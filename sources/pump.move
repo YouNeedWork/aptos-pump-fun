@@ -25,11 +25,26 @@ module pump::pump {
         virtual_sui_reserves: arg0.initial_virtual_sui_reserves,
         remain_token_reserves: 0x2::coin::mint<T0>(&mut arg1, arg0.remain_token_reserves, arg10),
         is_completed: false,
+
+         let v0 = Configuration{
+            id                             : 0x2::object::new(arg0),
+            version                        : 5,
+            admin                          : @0x49cc391ab4d3503e03dbb24c4f9e28f3cdd2ddf8a459e0d43012c3868ffefa1,
+            platform_fee                   : 50,
+            graduated_fee                  : 300000000000,
+            initial_virtual_sui_reserves   : 3000000000000,
+            initial_virtual_token_reserves : 10000000000000000,
+            remain_token_reserves          : 2000000000000000,
+            token_decimals                 : 6,
+        };
     */
 
     struct PumpConfig has key, store {
+        platform_fee: u64,
         initial_virtual_token_reserves: u64,
-        initial_virtual_apt_reserves: u64
+        initial_virtual_apt_reserves: u64,
+        remain_token_reserves: u64,
+        token_decimals: u64
     }
 
     struct Pump<phantom CoinType> has key, store {
@@ -80,8 +95,11 @@ module pump::pump {
         move_to(
             pump_admin,
             PumpConfig {
-                initial_virtual_token_reserves: 1000000000000 * 100_000_000,
-                initial_virtual_apt_reserves: 100 * 100_000_000
+                platform_fee: 50,
+                initial_virtual_token_reserves: 10000000000 * 1_000_000,
+                initial_virtual_apt_reserves: 100 * 100_000_000,
+                token_decimals: 6,
+                remain_token_reserves: 200_000_000_000_000
             }
         );
 

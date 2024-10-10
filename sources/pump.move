@@ -3,21 +3,18 @@ module pump::pump {
     use std::signer::address_of;
     use std::string;
     use std::string::String;
-    use aptos_std::debug::print;
     use aptos_std::math64;
     use aptos_std::simple_map::SimpleMap;
+    use aptos_std::type_info::type_name;
     use aptos_framework::account;
     use aptos_framework::account::SignerCapability;
     use aptos_framework::aptos_coin::AptosCoin;
     use aptos_framework::coin;
     use aptos_framework::coin::{Coin, MintCapability};
     use aptos_framework::event;
-    #[test_only]
-    use std::signer;
-    #[test_only]
-    use aptos_framework::aptos_coin;
 
     //errors
+    const ERROR_INVALID_LENGTH: u64 = 9999;
     const ERROR_NO_AUTH: u64 = 10000;
     const ERROR_INITIALIZED: u64 = 10001;
     const ERROR_NOT_ALLOW_PRE_MINT: u64 = 10002;
@@ -56,6 +53,16 @@ module pump::pump {
     // events
     #[event]
     struct PumpEvent has drop, store {
+        pool: String,
+        dev: address,
+        description: String,
+        name: String,
+        symbol: String,
+        uri: String,
+        website: String,
+        telegram: String,
+        twitter: String,
+        //ts:u64,
         platform_fee: u64,
         initial_virtual_token_reserves: u64,
         initial_virtual_apt_reserves: u64,
@@ -64,17 +71,16 @@ module pump::pump {
     }
 
     #[event]
-    struct BuyEvent has drop, store {
+    struct TradeEvent has drop, store {
+        apt_amount: u64,
+        is_buy: bool,
+        token_address: String,
         token_amount: u64,
-        apt_amount: u64
+        //ts: u64,
+        user: address,
+        virtual_aptos_reserves: u64,
+        virtual_token_reserves: u64
     }
-
-    #[event]
-    struct SellEvent has drop, store {
-        token_amount: u64,
-        apt_amount: u64
-    }
-
 
     #[view]
     public fun calculate_add_liquidity_cost(
@@ -128,11 +134,28 @@ module pump::pump {
     }
 
     public fun deploy<CoinType>(
-        caller: &signer, mintCap: MintCapability<CoinType>
+        caller: &signer,
+        mintCap: MintCapability<CoinType>,
+        description: String,
+        name: String,
+        symbol: String,
+        uri: String,
+        website: String,
+        telegram: String,
+        twitter: String,
     ) acquires PumpConfig {
+        assert!(!(string::length(&description) > 300), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&name) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&symbol) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&uri) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&website) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&telegram) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&twitter) > 100), ERROR_INVALID_LENGTH);
+
         if (*option::borrow(&coin::supply<CoinType>()) != 0) {
             abort ERROR_NOT_ALLOW_PRE_MINT
         };
+
         let config = borrow_global<PumpConfig>(@pump);
         let sender = address_of(caller);
         assert!(coin::decimals<CoinType>()==config.token_decimals, ERROR_TOKEN_DECIMAL);
@@ -162,7 +185,17 @@ module pump::pump {
                 initial_virtual_token_reserves: config.initial_virtual_token_reserves,
                 initial_virtual_apt_reserves: config.initial_virtual_apt_reserves,
                 remain_token_reserves: config.remain_token_reserves,
-                token_decimals: config.token_decimals
+                token_decimals: config.token_decimals,
+                pool: type_name<Pool<CoinType>>(),
+                dev: sender,
+                description,
+                name,
+                symbol,
+                uri,
+                website,
+                telegram,
+                twitter,
+                //ts: timestamp::now_seconds(),
             }
         );
     }
@@ -216,7 +249,7 @@ module pump::pump {
     }
 
     public fun buy<CoinType>(
-        caller: &signer, apt_coin: Coin<AptosCoin>, out_amount: u64
+        caller: &signer, out_amount: u64
     ) acquires PumpConfig, Pool {
         assert!(out_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
 
@@ -230,8 +263,6 @@ module pump::pump {
         let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
 
-        let apt_amount = coin::value(&apt_coin);
-
         let token_reserve_difference =
             pool.virtual_token_reserves - coin::value(&pool.remain_token_reserves);
 
@@ -244,12 +275,11 @@ module pump::pump {
                 (token_amount as u256),
             ) + 1;
 
-        print(&liquidity_cost);
-
         let platform_fee =
             math64::mul_div((liquidity_cost as u64), config.platform_fee, 10000);
-        assert!(apt_amount >= ((liquidity_cost as u64) + platform_fee), 6);
+        let cost_apt = (liquidity_cost as u64)+platform_fee;
 
+        let apt_coin = coin::withdraw<AptosCoin>(caller,cost_apt);
         let platform_fee_coin = coin::extract<AptosCoin>(&mut apt_coin, platform_fee);
 
         let (received_token, remaining_apt) =
@@ -258,7 +288,7 @@ module pump::pump {
                 coin::zero<CoinType>(),
                 apt_coin,
                 token_amount,
-                apt_amount - (liquidity_cost as u64) - platform_fee
+                cost_apt,
             );
 
         pool.virtual_token_reserves = pool.virtual_token_reserves
@@ -279,11 +309,20 @@ module pump::pump {
             //transfer_pool<CoinType>(pool, arg2, admin_address, config.transfer_fee, arg4, arg5);
         };
 
-        event::emit(BuyEvent { token_amount, apt_amount });
+        event::emit(TradeEvent {
+            apt_amount,
+            is_buy: true,
+            token_address: type_name<Coin<CoinType>>(),
+            token_amount,
+            //ts: timestamp::now_seconds(),
+            user: sender,
+            virtual_aptos_reserves: pool.virtual_apt_reserves,
+            virtual_token_reserves: pool.virtual_token_reserves
+        });
     }
 
     public fun sell<CoinType>(
-        caller: &signer, token: Coin<CoinType>, out_amount: u64
+        caller: &signer, out_amount: u64
     ) acquires PumpConfig, Pool {
         assert!(out_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
 
@@ -296,18 +335,19 @@ module pump::pump {
         let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
 
-        let token_amount = coin::value<CoinType>(&token);
 
         let liquidity_remove =
             calculate_remove_liquidity_return(
                 (pool.virtual_token_reserves as u256),
                 (pool.virtual_apt_reserves as u256),
-                (token_amount as u256)
+                (out_amount as u256)
             );
 
         let out_amount = math64::min(out_amount, (liquidity_remove as u64));
+
+        let out_coin = coin::withdraw<CoinType>(caller, out_amount);
         let (token, apt) =
-            swap<CoinType>(pool, token, coin::zero<AptosCoin>(), 0, out_amount);
+            swap<CoinType>(pool, out_coin, coin::zero<AptosCoin>(), 0, out_amount);
 
         pool.virtual_apt_reserves = pool.virtual_apt_reserves
             - coin::value<AptosCoin>(&apt);
@@ -317,8 +357,26 @@ module pump::pump {
         coin::deposit(sender, token);
         coin::deposit(sender, apt);
 
-        event::emit(SellEvent { token_amount, apt_amount });
+        event::emit(TradeEvent {
+            apt_amount,
+            is_buy: false,
+            token_address: type_name<Coin<CoinType>>(),
+            token_amount,
+            //ts: timestamp::now_seconds(),
+            user: sender,
+            virtual_aptos_reserves: pool.virtual_apt_reserves,
+            virtual_token_reserves: pool.virtual_token_reserves
+        });
     }
+
+
+
+
+    // tests
+    #[test_only]
+    use std::signer;
+    #[test_only]
+    use aptos_framework::aptos_coin;
 
     #[test_only]
     public fun init_module_for_test(creator: &signer) {
@@ -331,7 +389,6 @@ module pump::pump {
 
     #[test_only]
     public fun deploy_usdt(pump: &signer) acquires PumpConfig {
-        use aptos_std::coin;
         let source_addr = signer::address_of(pump);
         account::create_account_for_test(source_addr);
 
@@ -346,7 +403,7 @@ module pump::pump {
             );
 
         coin::register<USDT>(pump);
-        deploy<USDT>(pump, mint_cap);
+        deploy<USDT>(pump, mint_cap,string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""));
 
         coin::destroy_burn_cap(burn_cap);
         coin::destroy_freeze_cap(freeze_cap);
@@ -356,6 +413,7 @@ module pump::pump {
     public fun test_deploy(pump: &signer) acquires PumpConfig {
         deploy_usdt(pump);
     }
+
 
     #[test_only]
     public fun new_account(account_addr: address): signer {
@@ -377,7 +435,6 @@ module pump::pump {
         }
     }
 
-
     #[test(pump = @pump)]
     public fun test_init(pump: &signer) acquires PumpConfig {
         init_module_for_test(pump);
@@ -394,14 +451,20 @@ module pump::pump {
     public fun test_buy(pump: &signer) acquires PumpConfig, Pool {
         deploy_usdt(pump);
 
-        //let resorce_addr = address_of(&resource);
+        let source_addr = signer::address_of(pump);
+        account::create_account_for_test(source_addr);
+        
+
         let aptos_framework = new_test_account(@aptos_framework);
         let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);
-        let apt_coin = coin::mint<AptosCoin>(10_000_000_000, &mint_cap);
+        //let apt_coin = coin::mint<AptosCoin>(100_000_000_000, &mint_cap);
+        aptos_coin::mint(&aptos_framework,@pump, 100_000_000_000);
         coin::destroy_burn_cap(burn_cap);
         coin::destroy_mint_cap(mint_cap);
+
+
         // Perform a buy transaction
-        buy<USDT>(pump, apt_coin, 5_000_000_000_000);
+        buy<USDT>(pump, 5_000_000_000_000);
         let config = borrow_global<PumpConfig>(@pump);
         let resource = account::create_signer_with_capability(&config.resource_cap);
         let pool = borrow_global_mut<Pool<USDT>>(address_of(&resource));
@@ -415,17 +478,12 @@ module pump::pump {
     public fun test_sell(pump: &signer) acquires PumpConfig, Pool {
         deploy_usdt(pump);
 
-        //let resorce_addr = address_of(&resource);
-        let aptos_framework = new_test_account(@aptos_framework);
-        let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);
-        let apt_coin = coin::mint<AptosCoin>(10_000_000_000, &mint_cap);
-        coin::destroy_burn_cap(burn_cap);
-        coin::destroy_mint_cap(mint_cap);
+
 
         // Perform a buy transaction
-        buy<USDT>(pump, apt_coin, 5_000_000_000_000);
-        let coin = coin::withdraw<USDT>(pump, 5_000_000_000_000);
-        sell<USDT>(pump, coin, 150075040); // give a amount that is greater than the amount of token in the pool
+        buy<USDT>(pump, 5_000_000_000_000);
+
+        sell<USDT>(pump,150075040); // give a amount that is greater than the amount of token in the pool
         let c = coin::withdraw<AptosCoin>(pump, 15007504);
         coin::deposit(@pump, c);
 

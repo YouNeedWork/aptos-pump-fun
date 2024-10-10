@@ -248,7 +248,7 @@ module pump::pump {
         assert!((arg0 as u128) * (arg1 as u128) <= (arg2 as u128) * (arg3 as u128), 2);
     }
 
-    public fun buy<CoinType>(
+    public entry fun buy<CoinType>(
         caller: &signer, out_amount: u64
     ) acquires PumpConfig, Pool {
         assert!(out_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
@@ -321,7 +321,7 @@ module pump::pump {
         });
     }
 
-    public fun sell<CoinType>(
+    public entry fun sell<CoinType>(
         caller: &signer, out_amount: u64
     ) acquires PumpConfig, Pool {
         assert!(out_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
@@ -453,7 +453,7 @@ module pump::pump {
 
         let source_addr = signer::address_of(pump);
         account::create_account_for_test(source_addr);
-        
+
 
         let aptos_framework = new_test_account(@aptos_framework);
         let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);

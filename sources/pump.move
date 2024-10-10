@@ -10,7 +10,7 @@ module pump::pump {
     use aptos_framework::account::SignerCapability;
     use aptos_framework::aptos_coin::AptosCoin;
     use aptos_framework::coin;
-    use aptos_framework::coin::{Coin, MintCapability};
+    use aptos_framework::coin::{Coin, MintCapability, burn};
     use aptos_framework::event;
 
     //errors
@@ -133,9 +133,8 @@ module pump::pump {
         );
     }
 
-    public fun deploy<CoinType>(
+    entry public fun deploy<CoinType>(
         caller: &signer,
-        mintCap: MintCapability<CoinType>,
         description: String,
         name: String,
         symbol: String,
@@ -163,6 +162,18 @@ module pump::pump {
         let resource = account::create_signer_with_capability(&config.resource_cap);
         let resorce_addr = address_of(&resource);
         assert!(!exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+
+        let (burn_cap, freeze_cap, mintCap) =
+            coin::initialize<CoinType>(
+                caller,
+                name,
+                symbol,
+                config.token_decimals,
+                true
+            );
+
+        coin::destroy_burn_cap(burn_cap);
+        coin::destroy_freeze_cap(freeze_cap);
 
         let pool = Pool {
             real_token_reserves: coin::mint<CoinType>(config.initial_virtual_token_reserves - config.remain_token_reserves, &mintCap),
@@ -391,22 +402,8 @@ module pump::pump {
     public fun deploy_usdt(pump: &signer) acquires PumpConfig {
         let source_addr = signer::address_of(pump);
         account::create_account_for_test(source_addr);
-
         init_module_for_test(pump);
-        let (burn_cap, freeze_cap, mint_cap) =
-            coin::initialize<USDT>(
-                pump,
-                string::utf8(b"USDT"),
-                string::utf8(b"USDT"),
-                6,
-                true
-            );
-
-        coin::register<USDT>(pump);
-        deploy<USDT>(pump, mint_cap,string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""));
-
-        coin::destroy_burn_cap(burn_cap);
-        coin::destroy_freeze_cap(freeze_cap);
+        deploy<USDT>(pump,string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""),string::utf8(b""));
     }
 
     #[test(pump = @pump)]

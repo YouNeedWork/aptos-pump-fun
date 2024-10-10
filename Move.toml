@@ -4,9 +4,8 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-pump = "0x1"
-[dev-addresses]
-pump = "0x1"
+pump = "0x6c3510d4096668dac8e72d1d608444f2185ddf7fbf1160957a53c5ae90359899"
+
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

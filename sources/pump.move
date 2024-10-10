@@ -10,7 +10,7 @@ module pump::pump {
     use aptos_framework::account::SignerCapability;
     use aptos_framework::aptos_coin::AptosCoin;
     use aptos_framework::coin;
-    use aptos_framework::coin::{Coin, MintCapability, burn};
+    use aptos_framework::coin::Coin;
     use aptos_framework::event;
 
     //errors
@@ -150,14 +150,84 @@ module pump::pump {
         assert!(!(string::length(&website) > 100), ERROR_INVALID_LENGTH);
         assert!(!(string::length(&telegram) > 100), ERROR_INVALID_LENGTH);
         assert!(!(string::length(&twitter) > 100), ERROR_INVALID_LENGTH);
+        let config = borrow_global<PumpConfig>(@pump);
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        let resorce_addr = address_of(&resource);
+        assert!(!exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
 
-        if (*option::borrow(&coin::supply<CoinType>()) != 0) {
-            abort ERROR_NOT_ALLOW_PRE_MINT
+        let (burn_cap, freeze_cap, mintCap) =
+            coin::initialize<CoinType>(
+                caller,
+                name,
+                symbol,
+                config.token_decimals,
+                true
+            );
+
+        coin::destroy_burn_cap(burn_cap);
+        coin::destroy_freeze_cap(freeze_cap);
+
+        let sender = address_of(caller);
+
+        let pool = Pool {
+            real_token_reserves: coin::mint<CoinType>(config.initial_virtual_token_reserves - config.remain_token_reserves, &mintCap),
+            real_apt_reserves: coin::zero<AptosCoin>(),
+            virtual_token_reserves: config.initial_virtual_token_reserves,
+            virtual_apt_reserves: config.initial_virtual_apt_reserves,
+            remain_token_reserves: coin::mint<CoinType>(config.remain_token_reserves, &mintCap),
+            is_completed: false,
+            dev: sender
         };
+
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        coin::register<CoinType>(&resource);
+        move_to(&resource, pool);
+
+        coin::destroy_mint_cap(mintCap);
+        event::emit(
+            PumpEvent {
+                platform_fee: config.platform_fee,
+                initial_virtual_token_reserves: config.initial_virtual_token_reserves,
+                initial_virtual_apt_reserves: config.initial_virtual_apt_reserves,
+                remain_token_reserves: config.remain_token_reserves,
+                token_decimals: config.token_decimals,
+                pool: type_name<Pool<CoinType>>(),
+                dev: sender,
+                description,
+                name,
+                symbol,
+                uri,
+                website,
+                telegram,
+                twitter,
+                //ts: timestamp::now_seconds(),
+            }
+        );
+    }
+
+    entry public fun deploy_and_buy<CoinType>(
+        caller: &signer,
+        out_amount: u64,
+        description: String,
+        name: String,
+        symbol: String,
+        uri: String,
+        website: String,
+        telegram: String,
+        twitter: String,
+    ) acquires PumpConfig, Pool {
+        assert!(!(string::length(&description) > 300), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&name) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&symbol) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&uri) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&website) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&telegram) > 100), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&twitter) > 100), ERROR_INVALID_LENGTH);
+
 
         let config = borrow_global<PumpConfig>(@pump);
         let sender = address_of(caller);
-        assert!(coin::decimals<CoinType>()==config.token_decimals, ERROR_TOKEN_DECIMAL);
+
 
         let resource = account::create_signer_with_capability(&config.resource_cap);
         let resorce_addr = address_of(&resource);
@@ -209,6 +279,8 @@ module pump::pump {
                 //ts: timestamp::now_seconds(),
             }
         );
+
+        buy<CoinType>(caller, out_amount);
     }
 
     fun swap<CoinType>(
@@ -260,7 +332,8 @@ module pump::pump {
     }
 
     public entry fun buy<CoinType>(
-        caller: &signer, out_amount: u64
+        caller: &signer,
+        out_amount: u64
     ) acquires PumpConfig, Pool {
         assert!(out_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
 

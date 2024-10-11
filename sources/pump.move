@@ -1,10 +1,8 @@
-module pump::pump {
-    use std::option;
+module pump::pump1 {
     use std::signer::address_of;
     use std::string;
     use std::string::String;
     use aptos_std::math64;
-    use aptos_std::simple_map::SimpleMap;
     use aptos_std::type_info::type_name;
     use aptos_framework::account;
     use aptos_framework::account::SignerCapability;
@@ -26,7 +24,7 @@ module pump::pump {
     const ERROR_TOKEN_DECIMAL: u64 = 10008;
 
     // structs
-    struct PumpConfig has key, store {
+    struct PumpConfig has key,store {
         platform_fee: u64,
         resource_cap: SignerCapability,
         platform_fee_address: address,
@@ -36,11 +34,7 @@ module pump::pump {
         token_decimals: u8
     }
 
-    struct Pump<phantom CoinType> has key, store {
-        pools: SimpleMap<String, Pool<CoinType>>
-    }
-
-    struct Pool<phantom CoinType> has key, store {
+    struct Pool<phantom CoinType> has key,store {
         real_token_reserves: Coin<CoinType>,
         real_apt_reserves: Coin<AptosCoin>,
         virtual_token_reserves: u64,
@@ -107,6 +101,23 @@ module pump::pump {
         token_reserves
             - ((apt_reserves * token_reserves) / (apt_reserves + liquidity_removed))
     }
+
+    /*
+    #[view]
+    public fun get_config(): PumpConfig acquires PumpConfig {
+        let config = borrow_global<PumpConfig>(@pump);
+      *config
+    }
+
+    #[view]
+    public fun get_pool<CoinType>(): Pool<CoinType> acquires PumpConfig, Pool {
+        let config = borrow_global<PumpConfig>(@pump);
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        let resorce_addr = address_of(&resource);
+        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+        *borrow_global<Pool<CoinType>>(resorce_addr)
+    }
+    */
 
     // initialize
     fun init_module(admin: &signer) {
@@ -223,7 +234,6 @@ module pump::pump {
         assert!(!(string::length(&website) > 100), ERROR_INVALID_LENGTH);
         assert!(!(string::length(&telegram) > 100), ERROR_INVALID_LENGTH);
         assert!(!(string::length(&twitter) > 100), ERROR_INVALID_LENGTH);
-
 
         let config = borrow_global<PumpConfig>(@pump);
         let sender = address_of(caller);

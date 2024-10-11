@@ -1,4 +1,4 @@
-module pump::pump1 {
+module pump::pump {
     use std::signer::address_of;
     use std::string;
     use std::string::String;

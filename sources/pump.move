@@ -343,9 +343,9 @@ module pump::pump {
 
     public entry fun buy<CoinType>(
         caller: &signer,
-        out_amount: u64
+        buy_token_amount: u64
     ) acquires PumpConfig, Pool {
-        assert!(out_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
+        assert!(buy_token_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
 
         let sender = address_of(caller);
         let config = borrow_global<PumpConfig>(@pump);
@@ -360,7 +360,7 @@ module pump::pump {
         let token_reserve_difference =
             pool.virtual_token_reserves - coin::value(&pool.remain_token_reserves);
 
-        let token_amount = math64::min(out_amount, token_reserve_difference);
+        let token_amount = math64::min(buy_token_amount, token_reserve_difference);
 
         let liquidity_cost =
             calculate_add_liquidity_cost(
@@ -369,12 +369,12 @@ module pump::pump {
                 (token_amount as u256),
             ) + 1;
 
+
+        let apt_coin = coin::withdraw<AptosCoin>(caller, (liquidity_cost as u64));
+
         let platform_fee =
             math64::mul_div((liquidity_cost as u64), config.platform_fee, 10000);
-        let cost_apt = (liquidity_cost as u64)+platform_fee;
-
-        let apt_coin = coin::withdraw<AptosCoin>(caller,cost_apt);
-        let platform_fee_coin = coin::extract<AptosCoin>(&mut apt_coin, platform_fee);
+        let platform_fee_coin = coin::withdraw<AptosCoin>(caller, platform_fee);
 
         let (received_token, remaining_apt) =
             swap<CoinType>(
@@ -382,7 +382,7 @@ module pump::pump {
                 coin::zero<CoinType>(),
                 apt_coin,
                 token_amount,
-                cost_apt,
+                0,
             );
 
         pool.virtual_token_reserves = pool.virtual_token_reserves
@@ -416,9 +416,9 @@ module pump::pump {
     }
 
     public entry fun sell<CoinType>(
-        caller: &signer, out_amount: u64
+        caller: &signer, sell_token_amount: u64
     ) acquires PumpConfig, Pool {
-        assert!(out_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
+        assert!(sell_token_amount > 0, ERROR_PUMP_AMOUNT_IS_NULL);
 
         let sender = address_of(caller);
         let config = borrow_global<PumpConfig>(@pump);
@@ -429,25 +429,26 @@ module pump::pump {
         let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
 
-
         let liquidity_remove =
             calculate_remove_liquidity_return(
                 (pool.virtual_token_reserves as u256),
                 (pool.virtual_apt_reserves as u256),
-                (out_amount as u256)
+                (sell_token_amount as u256)
             );
 
-        let out_amount = math64::min(out_amount, (liquidity_remove as u64));
-
-        let out_coin = coin::withdraw<CoinType>(caller, out_amount);
+        let out_coin = coin::withdraw<CoinType>(caller, sell_token_amount);
         let (token, apt) =
-            swap<CoinType>(pool, out_coin, coin::zero<AptosCoin>(), 0, out_amount);
+            swap<CoinType>(pool, out_coin, coin::zero<AptosCoin>(), 0, (liquidity_remove as u64));
 
         pool.virtual_apt_reserves = pool.virtual_apt_reserves
             - coin::value<AptosCoin>(&apt);
 
-        let token_amount = coin::value(&token);
         let apt_amount = coin::value(&apt);
+        let platform_fee =
+            math64::mul_div(apt_amount, config.platform_fee, 10000);
+        let platform_fee_coin = coin::extract<AptosCoin>(&mut apt, platform_fee);
+
+        coin::deposit(config.platform_fee_address, platform_fee_coin);
         coin::deposit(sender, token);
         coin::deposit(sender, apt);
 
@@ -455,7 +456,7 @@ module pump::pump {
             apt_amount,
             is_buy: false,
             token_address: type_name<Coin<CoinType>>(),
-            token_amount,
+            token_amount: sell_token_amount,
             //ts: timestamp::now_seconds(),
             user: sender,
             virtual_aptos_reserves: pool.virtual_apt_reserves,
@@ -464,11 +465,11 @@ module pump::pump {
     }
 
 
-
-
     // tests
     #[test_only]
     use std::signer;
+    #[test_only]
+    use aptos_std::debug::print;
     #[test_only]
     use aptos_framework::aptos_coin;
 
@@ -538,20 +539,26 @@ module pump::pump {
         let aptos_framework = new_test_account(@aptos_framework);
         let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);
         //let apt_coin = coin::mint<AptosCoin>(100_000_000_000, &mint_cap);
-        aptos_coin::mint(&aptos_framework,@pump, 100_000_000_000);
+        coin::register<AptosCoin>(pump);
+        //aptos_coin::mint(&aptos_framework,@pump, 100_000_000_000);
+        let apt_coin = coin::mint(100_000_000_000,&mint_cap);
+        coin::deposit(@pump, apt_coin);
+
+
         coin::destroy_burn_cap(burn_cap);
         coin::destroy_mint_cap(mint_cap);
-
-
         // Perform a buy transaction
-        buy<USDT>(pump, 5_000_000_000_000);
+        buy<USDT>(pump, 500_000_000_000);
+
         let config = borrow_global<PumpConfig>(@pump);
         let resource = account::create_signer_with_capability(&config.resource_cap);
         let pool = borrow_global_mut<Pool<USDT>>(address_of(&resource));
 
+        print(&coin::value(&pool.real_apt_reserves));
+
         assert!(pool.virtual_token_reserves < config.initial_virtual_token_reserves, 1);
         assert!(coin::value(&pool.real_apt_reserves) > 0, 2);
-        assert!(coin::value(&pool.real_apt_reserves) == 15007504, 2);
+        assert!(coin::value(&pool.real_apt_reserves) == 1500076, 2);
     }
 
     #[test(pump = @pump)]
@@ -559,13 +566,42 @@ module pump::pump {
         deploy_usdt(pump);
 
 
+        let aptos_framework = new_test_account(@aptos_framework);
+        let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);
+        coin::register<AptosCoin>(pump);
+        let apt_coin = coin::mint(100_000_000_000,&mint_cap);
+        coin::deposit(@pump, apt_coin);
+        coin::destroy_burn_cap(burn_cap);
+        coin::destroy_mint_cap(mint_cap);
 
         // Perform a buy transaction
-        buy<USDT>(pump, 5_000_000_000_000);
+        buy<USDT>(pump, 500_000_000_000);
+        sell<USDT>(pump,500_000_000_000); // give a amount that is greater than the amount of token in the pool
 
-        sell<USDT>(pump,150075040); // give a amount that is greater than the amount of token in the pool
-        let c = coin::withdraw<AptosCoin>(pump, 15007504);
-        coin::deposit(@pump, c);
+        let pump = borrow_global<PumpConfig>(@pump);
+        assert!(pump.platform_fee == 50, 1);
+        assert!(pump.platform_fee_address == @pump, 2);
+        assert!(pump.initial_virtual_token_reserves == 10000000000000000, 3);
+        assert!(pump.initial_virtual_apt_reserves == 30 * 1_000_000_000, 4);
+        assert!(pump.remain_token_reserves == 2000000000000000, 5);
+    }
+
+
+    #[test(pump = @pump)]
+    public fun test_sell_for_min_amount(pump: &signer) acquires PumpConfig, Pool {
+        deploy_usdt(pump);
+
+        let aptos_framework = new_test_account(@aptos_framework);
+        let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework);
+        coin::register<AptosCoin>(pump);
+        let apt_coin = coin::mint(100_000_000_000,&mint_cap);
+        coin::deposit(@pump, apt_coin);
+        coin::destroy_burn_cap(burn_cap);
+        coin::destroy_mint_cap(mint_cap);
+
+        // Perform a buy transaction
+        buy<USDT>(pump, 1_000_000);
+        sell<USDT>(pump,1_000_000); // give a amount that is greater than the amount of token in the pool
 
         let pump = borrow_global<PumpConfig>(@pump);
         assert!(pump.platform_fee == 50, 1);

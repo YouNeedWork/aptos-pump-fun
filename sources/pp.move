@@ -1,3 +1,3 @@
 module pump::PP {
-    struct PP{}
+    struct PP {}
 }

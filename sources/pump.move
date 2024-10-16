@@ -515,7 +515,7 @@ module pump::pump {
     struct USDT has key, store {}
 
     #[test_only]
-    public fun deploy_usdt(pump: &signer) acquires PumpConfig {
+    public fun deploy_usdt(pump: &signer) acquires PumpConfig, Handle {
         let source_addr = signer::address_of(pump);
         account::create_account_for_test(source_addr);
         init_module_for_test(pump);
@@ -532,7 +532,7 @@ module pump::pump {
     }
 
     #[test(pump = @pump)]
-    public fun test_deploy(pump: &signer) acquires PumpConfig {
+    public fun test_deploy(pump: &signer) acquires PumpConfig, Handle {
         deploy_usdt(pump);
     }
 
@@ -569,7 +569,7 @@ module pump::pump {
     }
 
     #[test(pump = @pump)]
-    public fun test_buy(pump: &signer) acquires PumpConfig, Pool {
+    public fun test_buy(pump: &signer) acquires PumpConfig, Pool, Handle {
         deploy_usdt(pump);
 
         let source_addr = signer::address_of(pump);
@@ -600,7 +600,7 @@ module pump::pump {
     }
 
     #[test(pump = @pump)]
-    public fun test_sell(pump: &signer) acquires PumpConfig, Pool {
+    public fun test_sell(pump: &signer) acquires PumpConfig, Pool, Handle {
         deploy_usdt(pump);
 
         let aptos_framework = new_test_account(@aptos_framework);
@@ -624,7 +624,7 @@ module pump::pump {
     }
 
     #[test(pump = @pump)]
-    public fun test_sell_for_min_amount(pump: &signer) acquires PumpConfig, Pool {
+    public fun test_sell_for_min_amount(pump: &signer) acquires PumpConfig, Pool, Handle {
         deploy_usdt(pump);
 
         let aptos_framework = new_test_account(@aptos_framework);

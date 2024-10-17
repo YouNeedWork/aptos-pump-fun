@@ -11,6 +11,8 @@ git = "https://github.com/aptos-labs/aptos-core.git"
 rev = "mainnet"
 subdir = "aptos-move/framework/aptos-framework"
 
-
+[dependencies.Liquidswap]
+git = "https://github.com/pontem-network/liquidswap.git"
+rev = "main"
 
 [dev-dependencies]

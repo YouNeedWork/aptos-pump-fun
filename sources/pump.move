@@ -11,6 +11,8 @@ module pump::pump {
     use aptos_framework::coin::Coin;
     use aptos_framework::event;
 
+    //use liquidswap::router;
+
     //errors
     const ERROR_INVALID_LENGTH: u64 = 9999;
     const ERROR_NO_AUTH: u64 = 10000;
@@ -40,13 +42,16 @@ module pump::pump {
         virtual_token_reserves: u64,
         virtual_apt_reserves: u64,
         remain_token_reserves: Coin<CoinType>,
+        token_freeze_cap: coin::FreezeCapability<CoinType>,
         is_completed: bool,
         dev: address
     }
 
     struct Handle has key {
         created_events: event::EventHandle<PumpEvent>,
-        trade_events: event::EventHandle<TradeEvent>
+        trade_events: event::EventHandle<TradeEvent>,
+        transfer_events: event::EventHandle<TransferEvent>,
+        unfreeze_events: event::EventHandle<UnfreezeEvent>
     }
 
     // events
@@ -81,6 +86,69 @@ module pump::pump {
         virtual_token_reserves: u64
     }
 
+    #[event]
+    struct TransferEvent has drop, store {
+        apt_amount: u64,
+        token_address: String,
+        token_amount: u64,
+        user: address,
+        virtual_aptos_reserves: u64,
+        virtual_token_reserves: u64
+    }
+
+    #[event]
+    struct UnfreezeEvent has drop, store {
+        token_address: String,
+        user: address,
+    }
+
+
+    #[view]
+    public fun buy_price<CoinType>(buy_token_amount:u64):u64 acquires PumpConfig, Pool {
+        let config = borrow_global<PumpConfig>(@pump);
+
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        let resorce_addr = address_of(&resource);
+        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+
+        let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
+        assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
+
+        let token_reserve_difference =
+            pool.virtual_token_reserves - coin::value(&pool.remain_token_reserves);
+
+        let token_amount = math64::min(buy_token_amount, token_reserve_difference);
+
+        let liquidity_cost =
+            calculate_add_liquidity_cost(
+                (pool.virtual_apt_reserves as u256),
+                (pool.virtual_token_reserves as u256),
+                (token_amount as u256)
+            ) + 1;
+
+        (liquidity_cost as u64)
+    }
+
+    #[view]
+    public fun sell_price<CoinType>(sell_token_amount:u64):u64 acquires PumpConfig, Pool {
+        let config = borrow_global<PumpConfig>(@pump);
+
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        let resorce_addr = address_of(&resource);
+        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+        let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
+        assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
+
+        let liquidity_remove =
+            calculate_remove_liquidity_return(
+                (pool.virtual_token_reserves as u256),
+                (pool.virtual_apt_reserves as u256),
+                (sell_token_amount as u256)
+            );
+
+        (liquidity_remove as u64)
+    }
+
     #[view]
     public fun calculate_add_liquidity_cost(
         apt_reserves: u256, virtual_token_reserves: u256, token_amount: u256
@@ -107,22 +175,6 @@ module pump::pump {
             - ((apt_reserves * token_reserves) / (apt_reserves + liquidity_removed))
     }
 
-    /*
-    #[view]
-    public fun get_config(): PumpConfig acquires PumpConfig {
-        let config = borrow_global<PumpConfig>(@pump);
-      *config
-    }
-
-    #[view]
-    public fun get_pool<CoinType>(): Pool<CoinType> acquires PumpConfig, Pool {
-        let config = borrow_global<PumpConfig>(@pump);
-        let resource = account::create_signer_with_capability(&config.resource_cap);
-        let resorce_addr = address_of(&resource);
-        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
-        *borrow_global<Pool<CoinType>>(resorce_addr)
-    }
-    */
 
     // initialize
     fun init_module(admin: &signer) {
@@ -139,7 +191,9 @@ module pump::pump {
             pump_admin,
             Handle {
                 created_events: account::new_event_handle<PumpEvent>(pump_admin),
-                trade_events: account::new_event_handle<TradeEvent>(pump_admin)
+                trade_events: account::new_event_handle<TradeEvent>(pump_admin),
+                transfer_events: account::new_event_handle<TransferEvent>(pump_admin),
+                unfreeze_events: account::new_event_handle<UnfreezeEvent>(pump_admin)
             }
         );
 
@@ -167,7 +221,7 @@ module pump::pump {
         telegram: String,
         twitter: String
     ) acquires PumpConfig, Handle {
-        assert!(!(string::length(&description) > 300), ERROR_INVALID_LENGTH);
+        assert!(!(string::length(&description) > 1000), ERROR_INVALID_LENGTH);
         assert!(!(string::length(&name) > 100), ERROR_INVALID_LENGTH);
         assert!(!(string::length(&symbol) > 100), ERROR_INVALID_LENGTH);
         assert!(!(string::length(&uri) > 100), ERROR_INVALID_LENGTH);
@@ -189,7 +243,6 @@ module pump::pump {
             );
 
         coin::destroy_burn_cap(burn_cap);
-        coin::destroy_freeze_cap(freeze_cap);
 
         let sender = address_of(caller);
 
@@ -204,6 +257,7 @@ module pump::pump {
             remain_token_reserves: coin::mint<CoinType>(
                 config.remain_token_reserves, &mintCap
             ),
+            token_freeze_cap: freeze_cap,
             is_completed: false,
             dev: sender
         };
@@ -284,6 +338,7 @@ module pump::pump {
             remain_token_reserves: coin::mint<CoinType>(
                 config.remain_token_reserves, &mintCap
             ),
+            token_freeze_cap: freeze_cap,
             is_completed: false,
             dev: sender
         };
@@ -417,13 +472,42 @@ module pump::pump {
         coin::register<AptosCoin>(caller);
 
         coin::deposit(sender, received_token);
+        coin::freeze_coin_store(sender,&pool.token_freeze_cap);
+
         coin::deposit(sender, remaining_apt);
         coin::deposit(config.platform_fee_address, platform_fee_coin);
 
         if (token_reserve_difference == token_amount
-            || coin::value<AptosCoin>(&pool.real_apt_reserves) >= 30_000_000_000) {
+            || coin::value<AptosCoin>(&pool.real_apt_reserves) >= 3_000_000_000) {
             // TODO: transfer_pool to dex: https://app.razordex.xyz/
-            //transfer_pool<CoinType>(pool, arg2, admin_address, config.transfer_fee, arg4, arg5);
+            pool.is_completed = true;
+            coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
+
+
+            event::emit_event(
+                &mut borrow_global_mut<Handle>(@pump).transfer_events,
+                TransferEvent {
+                    apt_amount,
+                    token_address: type_name<Coin<CoinType>>(),
+                    token_amount,
+                    user: sender,
+                    virtual_aptos_reserves: pool.virtual_apt_reserves,
+                    virtual_token_reserves: pool.virtual_token_reserves
+                }
+            );
+            /*
+            router::register_pool<AptosCoin, CoinType, Curve>(caller);
+            let (apt,token,lp) = router::add_liquidity<AptosCoin, CoinType, Curve>(
+                coin_x: Coin<X>,
+                min_coin_x_val: u64,
+                coin_y: Coin<Y>,
+                min_coin_y_val: u64,
+            );
+            //Send to the 0x000000 address
+            coin::deposit(sender, lp);
+            coin::deposit(sender, apt);
+            coin::deposit(sender, token);
+            */
         };
 
         event::emit_event(
@@ -462,6 +546,7 @@ module pump::pump {
                 (sell_token_amount as u256)
             );
 
+        coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
         let out_coin = coin::withdraw<CoinType>(caller, sell_token_amount);
         let (token, apt) =
             swap<CoinType>(
@@ -494,6 +579,29 @@ module pump::pump {
                 user: sender,
                 virtual_aptos_reserves: pool.virtual_apt_reserves,
                 virtual_token_reserves: pool.virtual_token_reserves
+            }
+        );
+    }
+
+    public entry fun unfreeze_token<CoinType>(
+        caller: &signer
+    ) acquires PumpConfig, Pool, Handle {
+        let sender = address_of(caller);
+        let config = borrow_global<PumpConfig>(@pump);
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        let resorce_addr = address_of(&resource);
+        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+        let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
+
+        //require completed here.
+        assert!(pool.is_completed, ERROR_PUMP_COMPLETED);
+        coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
+        //TODO: emit unfreeze event
+        event::emit_event(
+            &mut borrow_global_mut<Handle>(@pump).unfreeze_events,
+            UnfreezeEvent {
+                token_address: type_name<Coin<CoinType>>(),
+                user: sender,
             }
         );
     }

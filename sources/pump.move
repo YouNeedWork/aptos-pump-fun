@@ -1,7 +1,9 @@
 module pump::pump {
+    use std::option;
     use std::signer::address_of;
     use std::string;
     use std::string::String;
+    use std::vector;
     use aptos_std::math64;
     use aptos_std::type_info::type_name;
     use aptos_framework::account;
@@ -10,6 +12,9 @@ module pump::pump {
     use aptos_framework::coin;
     use aptos_framework::coin::Coin;
     use aptos_framework::event;
+
+    use razor::RazorSwapPool;
+    use razor::RazorPoolLibrary;
 
     //use liquidswap::router;
 
@@ -99,12 +104,11 @@ module pump::pump {
     #[event]
     struct UnfreezeEvent has drop, store {
         token_address: String,
-        user: address,
+        user: address
     }
 
-
     #[view]
-    public fun buy_price<CoinType>(buy_token_amount:u64):u64 acquires PumpConfig, Pool {
+    public fun buy_price<CoinType>(buy_token_amount: u64): u64 acquires PumpConfig, Pool {
         let config = borrow_global<PumpConfig>(@pump);
 
         let resource = account::create_signer_with_capability(&config.resource_cap);
@@ -130,7 +134,7 @@ module pump::pump {
     }
 
     #[view]
-    public fun sell_price<CoinType>(sell_token_amount:u64):u64 acquires PumpConfig, Pool {
+    public fun sell_price<CoinType>(sell_token_amount: u64): u64 acquires PumpConfig, Pool {
         let config = borrow_global<PumpConfig>(@pump);
 
         let resource = account::create_signer_with_capability(&config.resource_cap);
@@ -174,7 +178,6 @@ module pump::pump {
         token_reserves
             - ((apt_reserves * token_reserves) / (apt_reserves + liquidity_removed))
     }
-
 
     // initialize
     fun init_module(admin: &signer) {
@@ -429,10 +432,10 @@ module pump::pump {
         let config = borrow_global<PumpConfig>(@pump);
 
         let resource = account::create_signer_with_capability(&config.resource_cap);
-        let resorce_addr = address_of(&resource);
-        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+        let resource_addr = address_of(&resource);
+        assert!(exists<Pool<CoinType>>(resource_addr), ERROR_PUMP_NOT_EXIST);
 
-        let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
+        let pool = borrow_global_mut<Pool<CoinType>>(resource_addr);
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
 
         let token_reserve_difference =
@@ -472,7 +475,7 @@ module pump::pump {
         coin::register<AptosCoin>(caller);
 
         coin::deposit(sender, received_token);
-        coin::freeze_coin_store(sender,&pool.token_freeze_cap);
+        coin::freeze_coin_store(sender, &pool.token_freeze_cap);
 
         coin::deposit(sender, remaining_apt);
         coin::deposit(config.platform_fee_address, platform_fee_coin);
@@ -483,6 +486,54 @@ module pump::pump {
             pool.is_completed = true;
             coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
 
+            let received_token = coin::extract_all(&mut pool.real_token_reserves);
+            let received_apt = coin::extract_all(&mut pool.real_apt_reserves);
+
+            let received_token_amount = coin::value(&received_token);
+            let received_apt_amount = coin::value(&received_apt);
+
+            coin::deposit(resource_addr, received_token);
+            coin::deposit(resource_addr, received_apt);
+
+            if (RazorPoolLibrary::compare<CoinType, AptosCoin>()) {
+                RazorSwapPool::add_liquidity_entry<CoinType, AptosCoin>(
+                    caller,
+                    received_token_amount,
+                    received_apt_amount,
+                    0,
+                    0
+                );
+
+                let sup =
+                    option::extract(
+                        &mut coin::supply<RazorSwapPool::LPCoin<CoinType, AptosCoin>>()
+                    );
+
+                let co =
+                    coin::withdraw<RazorSwapPool::LPCoin<CoinType, AptosCoin>>(
+                        &mut resource, (sup as u64)
+                    );
+                coin::deposit(@dead, co);
+            } else {
+                RazorSwapPool::add_liquidity_entry<AptosCoin, CoinType>(
+                    caller,
+                    received_apt_amount,
+                    received_token_amount,
+                    0,
+                    0
+                );
+
+                let sup =
+                    option::extract(
+                        &mut coin::supply<RazorSwapPool::LPCoin<AptosCoin, CoinType>>()
+                    );
+
+                let co =
+                    coin::withdraw<RazorSwapPool::LPCoin<AptosCoin, CoinType>>(
+                        &mut resource, (sup as u64)
+                    );
+                coin::deposit(@dead, co);
+            };
 
             event::emit_event(
                 &mut borrow_global_mut<Handle>(@pump).transfer_events,
@@ -583,9 +634,7 @@ module pump::pump {
         );
     }
 
-    public entry fun unfreeze_token<CoinType>(
-        caller: &signer
-    ) acquires PumpConfig, Pool, Handle {
+    public entry fun unfreeze_token<CoinType>(caller: &signer) acquires PumpConfig, Pool, Handle {
         let sender = address_of(caller);
         let config = borrow_global<PumpConfig>(@pump);
         let resource = account::create_signer_with_capability(&config.resource_cap);
@@ -596,14 +645,43 @@ module pump::pump {
         //require completed here.
         assert!(pool.is_completed, ERROR_PUMP_COMPLETED);
         coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
-        //TODO: emit unfreeze event
+        //emit unfreeze event
         event::emit_event(
             &mut borrow_global_mut<Handle>(@pump).unfreeze_events,
             UnfreezeEvent {
                 token_address: type_name<Coin<CoinType>>(),
-                user: sender,
+                user: sender
             }
         );
+    }
+
+    public entry fun batch_unfreeze_token<CoinType>(
+        caller: &signer, addresses: vector<address>
+    ) acquires PumpConfig, Pool, Handle {
+        let sender = address_of(caller);
+        let config = borrow_global<PumpConfig>(@pump);
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        let resorce_addr = address_of(&resource);
+        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+        let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
+
+        //require completed here.
+        assert!(pool.is_completed, ERROR_PUMP_COMPLETED);
+
+        let len = vector::length(&addresses);
+        while (len >= 1) {
+            let addr = vector::pop_back(&mut addresses);
+            coin::unfreeze_coin_store(addr, &pool.token_freeze_cap);
+            event::emit_event(
+                &mut borrow_global_mut<Handle>(@pump).unfreeze_events,
+                UnfreezeEvent {
+                    token_address: type_name<Coin<CoinType>>(),
+                    user: sender
+                }
+            );
+
+            len = len - 1;
+        }
     }
 
     // tests

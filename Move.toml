@@ -5,6 +5,9 @@ authors = []
 
 [addresses]
 pump = "0x5feef6886d309f7a4e3592ecba397030b8a0e966d082f5bff9b5bfb4a7899004"
+razor = "0x65c7939df25c4986b38a6af99602bf17daa1a2d7b53e6847ed25c04f74f54607"
+dead = "0xdead"
+dev = "0x0"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

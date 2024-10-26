@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-pump = "0xef9b17d1fb0f975e2a3adda724a25eb19c77253ceabe72c9859593219a15b0ff"
+pump = "0x6c3510d4096668dac8e72d1d608444f2185ddf7fbf1160957a53c5ae90359899"
 dead = "0xdead"
 
 [dependencies.AptosFramework]
@@ -12,11 +12,11 @@ git = "https://github.com/aptos-labs/aptos-core.git"
 rev = "mainnet"
 subdir = "aptos-move/framework/aptos-framework"
 
-[dependencies.Liquidswap]
-git = "https://github.com/pontem-network/liquidswap.git"
-rev = "main"
+#[dependencies.Liquidswap]
+#git = "https://github.com/pontem-network/liquidswap.git"
+#rev = "main"
 
-[dependencies.razor]
+[dependencies.amm-v1]
 local = "../razor/"
 
 [dev-dependencies]

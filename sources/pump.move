@@ -13,8 +13,8 @@ module pump::pump {
     use aptos_framework::coin::Coin;
     use aptos_framework::event;
 
-    use razor::RazorSwapPool;
-    use razor::RazorPoolLibrary;
+    use amm_v1::RazorSwapPool;
+    use amm_v1::RazorPoolLibrary;
 
     //use liquidswap::router;
 
@@ -451,6 +451,7 @@ module pump::pump {
             ) + 1;
 
         let apt_coin = coin::withdraw<AptosCoin>(caller, (liquidity_cost as u64));
+        let apt_amount = coin::value(&apt_coin);
 
         let platform_fee =
             math64::mul_div((liquidity_cost as u64), config.platform_fee, 10000);
@@ -469,7 +470,7 @@ module pump::pump {
             - coin::value(&received_token);
 
         let token_amount = coin::value(&received_token);
-        let apt_amount = coin::value(&remaining_apt);
+
 
         coin::register<CoinType>(caller);
         coin::register<AptosCoin>(caller);
@@ -482,12 +483,14 @@ module pump::pump {
 
         if (token_reserve_difference == token_amount
             || coin::value<AptosCoin>(&pool.real_apt_reserves) >= 3_000_000_000) {
-            // TODO: transfer_pool to dex: https://app.razordex.xyz/
+            //  transfer_pool to dex: https://app.razordex.xyz/
             pool.is_completed = true;
             coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
 
             let received_token = coin::extract_all(&mut pool.real_token_reserves);
             let received_apt = coin::extract_all(&mut pool.real_apt_reserves);
+
+
 
             let received_token_amount = coin::value(&received_token);
             let received_apt_amount = coin::value(&received_apt);
@@ -538,9 +541,9 @@ module pump::pump {
             event::emit_event(
                 &mut borrow_global_mut<Handle>(@pump).transfer_events,
                 TransferEvent {
-                    apt_amount,
+                    apt_amount:received_apt_amount,
                     token_address: type_name<Coin<CoinType>>(),
-                    token_amount,
+                    token_amount:received_token_amount,
                     user: sender,
                     virtual_aptos_reserves: pool.virtual_apt_reserves,
                     virtual_token_reserves: pool.virtual_token_reserves

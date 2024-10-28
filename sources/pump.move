@@ -207,7 +207,7 @@ module pump::pump {
                 platform_fee_address: @pump,
                 resource_cap: signer_cap,
                 initial_virtual_token_reserves: 10000000000000000,
-                initial_virtual_apt_reserves: 30 * 1_000_000_000, //30 APT
+                initial_virtual_apt_reserves: 30 * 100_000_000, //30 APT
                 token_decimals: 6,
                 remain_token_reserves: 2000000000000000
             }
@@ -482,7 +482,7 @@ module pump::pump {
         coin::deposit(config.platform_fee_address, platform_fee_coin);
 
         if (token_reserve_difference == token_amount
-            || coin::value<AptosCoin>(&pool.real_apt_reserves) >= 3_000_000_000) {
+            || coin::value<AptosCoin>(&pool.real_apt_reserves) >= 300_000_000) {
             //  transfer_pool to dex: https://app.razordex.xyz/
             pool.is_completed = true;
             coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);

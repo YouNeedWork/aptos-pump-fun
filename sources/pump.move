@@ -437,6 +437,7 @@ module pump::pump {
 
         let pool = borrow_global_mut<Pool<CoinType>>(resource_addr);
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
+        coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
 
         let token_reserve_difference =
             pool.virtual_token_reserves - coin::value(&pool.remain_token_reserves);
@@ -622,6 +623,8 @@ module pump::pump {
         coin::deposit(sender, token);
         coin::deposit(sender, apt);
 
+        coin::freeze_coin_store(sender, &pool.token_freeze_cap);
+
         event::emit_event(
             &mut borrow_global_mut<Handle>(@pump).trade_events,
             TradeEvent {
@@ -752,7 +755,7 @@ module pump::pump {
         assert!(pump.platform_fee == 50, 1);
         assert!(pump.platform_fee_address == @pump, 2);
         assert!(pump.initial_virtual_token_reserves == 10000000000000000, 3);
-        assert!(pump.initial_virtual_apt_reserves == 30 * 1_000_000_000, 4);
+        assert!(pump.initial_virtual_apt_reserves == 30 * 100_000_000, 4);
         assert!(pump.remain_token_reserves == 2000000000000000, 5);
         assert!(pump.token_decimals == 6, 6);
     }
@@ -808,7 +811,7 @@ module pump::pump {
         assert!(pump.platform_fee == 50, 1);
         assert!(pump.platform_fee_address == @pump, 2);
         assert!(pump.initial_virtual_token_reserves == 10000000000000000, 3);
-        assert!(pump.initial_virtual_apt_reserves == 30 * 1_000_000_000, 4);
+        assert!(pump.initial_virtual_apt_reserves == 30 * 100_000_000, 4);
         assert!(pump.remain_token_reserves == 2000000000000000, 5);
     }
 
@@ -832,7 +835,7 @@ module pump::pump {
         assert!(pump.platform_fee == 50, 1);
         assert!(pump.platform_fee_address == @pump, 2);
         assert!(pump.initial_virtual_token_reserves == 10000000000000000, 3);
-        assert!(pump.initial_virtual_apt_reserves == 30 * 1_000_000_000, 4);
+        assert!(pump.initial_virtual_apt_reserves == 30 * 100_000_000, 4);
         assert!(pump.remain_token_reserves == 2000000000000000, 5);
     }
 }

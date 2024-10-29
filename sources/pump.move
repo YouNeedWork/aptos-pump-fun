@@ -16,8 +16,6 @@ module pump::pump {
     use amm_v1::RazorSwapPool;
     use amm_v1::RazorPoolLibrary;
 
-    //use liquidswap::router;
-
     //errors
     const ERROR_INVALID_LENGTH: u64 = 9999;
     const ERROR_NO_AUTH: u64 = 10000;
@@ -36,7 +34,7 @@ module pump::pump {
         resource_cap: SignerCapability,
         platform_fee_address: address,
         initial_virtual_token_reserves: u64,
-        initial_virtual_apt_reserves: u64,
+        initial_virtual_move_reserves: u64,
         remain_token_reserves: u64,
         token_decimals: u8
     }
@@ -74,7 +72,7 @@ module pump::pump {
         //ts:u64,
         platform_fee: u64,
         initial_virtual_token_reserves: u64,
-        initial_virtual_apt_reserves: u64,
+        initial_virtual_move_reserves: u64,
         remain_token_reserves: u64,
         token_decimals: u8
     }
@@ -97,7 +95,7 @@ module pump::pump {
         token_address: String,
         token_amount: u64,
         user: address,
-        virtual_aptos_reserves: u64,
+        virtual_move_reserves: u64,
         virtual_token_reserves: u64
     }
 
@@ -108,7 +106,7 @@ module pump::pump {
     }
 
     #[view]
-    public fun buy_price<CoinType>(buy_token_amount: u64): u64 acquires PumpConfig, Pool {
+    public fun buy_token<CoinType>(buy_token_amount: u64): u64 acquires PumpConfig, Pool {
         let config = borrow_global<PumpConfig>(@pump);
 
         let resource = account::create_signer_with_capability(&config.resource_cap);
@@ -134,7 +132,7 @@ module pump::pump {
     }
 
     #[view]
-    public fun sell_price<CoinType>(sell_token_amount: u64): u64 acquires PumpConfig, Pool {
+    public fun sell_token<CoinType>(sell_token_amount: u64): u64 acquires PumpConfig, Pool {
         let config = borrow_global<PumpConfig>(@pump);
 
         let resource = account::create_signer_with_capability(&config.resource_cap);
@@ -153,8 +151,7 @@ module pump::pump {
         (liquidity_remove as u64)
     }
 
-    #[view]
-    public fun calculate_add_liquidity_cost(
+    fun calculate_add_liquidity_cost(
         apt_reserves: u256, virtual_token_reserves: u256, token_amount: u256
     ): u256 {
         let reserve_diff = virtual_token_reserves - token_amount;
@@ -163,20 +160,11 @@ module pump::pump {
         ((apt_reserves * virtual_token_reserves) / reserve_diff) - apt_reserves
     }
 
-    #[view]
-    public fun calculate_remove_liquidity_return(
+    fun calculate_remove_liquidity_return(
         token_reserves: u256, apt_reserves: u256, liquidity_removed: u256
     ): u256 {
         apt_reserves
             - ((token_reserves * apt_reserves) / (liquidity_removed + token_reserves))
-    }
-
-    #[view]
-    public fun calculate_token_amount_received(
-        apt_reserves: u256, token_reserves: u256, liquidity_removed: u256
-    ): u256 {
-        token_reserves
-            - ((apt_reserves * token_reserves) / (apt_reserves + liquidity_removed))
     }
 
     // initialize
@@ -207,8 +195,8 @@ module pump::pump {
                 platform_fee_address: @pump,
                 resource_cap: signer_cap,
                 initial_virtual_token_reserves: 10000000000000000,
-                initial_virtual_apt_reserves: 30 * 100_000_000, //30 APT
-                token_decimals: 6,
+                initial_virtual_move_reserves: 30 * 100_000_000, //30 MOVE
+                token_decimals: 8,
                 remain_token_reserves: 2000000000000000
             }
         );
@@ -256,7 +244,7 @@ module pump::pump {
             ),
             real_apt_reserves: coin::zero<AptosCoin>(),
             virtual_token_reserves: config.initial_virtual_token_reserves,
-            virtual_apt_reserves: config.initial_virtual_apt_reserves,
+            virtual_apt_reserves: config.initial_virtual_move_reserves,
             remain_token_reserves: coin::mint<CoinType>(
                 config.remain_token_reserves, &mintCap
             ),
@@ -276,7 +264,7 @@ module pump::pump {
             PumpEvent {
                 platform_fee: config.platform_fee,
                 initial_virtual_token_reserves: config.initial_virtual_token_reserves,
-                initial_virtual_apt_reserves: config.initial_virtual_apt_reserves,
+                initial_virtual_move_reserves: config.initial_virtual_move_reserves,
                 remain_token_reserves: config.remain_token_reserves,
                 token_decimals: config.token_decimals,
                 pool: type_name<Pool<CoinType>>(),
@@ -337,7 +325,7 @@ module pump::pump {
             ),
             real_apt_reserves: coin::zero<AptosCoin>(),
             virtual_token_reserves: config.initial_virtual_token_reserves,
-            virtual_apt_reserves: config.initial_virtual_apt_reserves,
+            virtual_apt_reserves: config.initial_virtual_move_reserves,
             remain_token_reserves: coin::mint<CoinType>(
                 config.remain_token_reserves, &mintCap
             ),
@@ -357,7 +345,7 @@ module pump::pump {
             PumpEvent {
                 platform_fee: config.platform_fee,
                 initial_virtual_token_reserves: config.initial_virtual_token_reserves,
-                initial_virtual_apt_reserves: config.initial_virtual_apt_reserves,
+                initial_virtual_move_reserves: config.initial_virtual_move_reserves,
                 remain_token_reserves: config.remain_token_reserves,
                 token_decimals: config.token_decimals,
                 pool: type_name<Pool<CoinType>>(),
@@ -472,7 +460,6 @@ module pump::pump {
 
         let token_amount = coin::value(&received_token);
 
-
         coin::register<CoinType>(caller);
         coin::register<AptosCoin>(caller);
 
@@ -490,8 +477,6 @@ module pump::pump {
 
             let received_token = coin::extract_all(&mut pool.real_token_reserves);
             let received_apt = coin::extract_all(&mut pool.real_apt_reserves);
-
-
 
             let received_token_amount = coin::value(&received_token);
             let received_apt_amount = coin::value(&received_apt);
@@ -542,11 +527,11 @@ module pump::pump {
             event::emit_event(
                 &mut borrow_global_mut<Handle>(@pump).transfer_events,
                 TransferEvent {
-                    apt_amount:received_apt_amount,
+                    apt_amount: received_apt_amount,
                     token_address: type_name<Coin<CoinType>>(),
-                    token_amount:received_token_amount,
+                    token_amount: received_token_amount,
                     user: sender,
-                    virtual_aptos_reserves: pool.virtual_apt_reserves,
+                    virtual_move_reserves: pool.virtual_apt_reserves,
                     virtual_token_reserves: pool.virtual_token_reserves
                 }
             );
@@ -755,7 +740,7 @@ module pump::pump {
         assert!(pump.platform_fee == 50, 1);
         assert!(pump.platform_fee_address == @pump, 2);
         assert!(pump.initial_virtual_token_reserves == 10000000000000000, 3);
-        assert!(pump.initial_virtual_apt_reserves == 30 * 100_000_000, 4);
+        assert!(pump.initial_virtual_move_reserves == 30 * 100_000_000, 4);
         assert!(pump.remain_token_reserves == 2000000000000000, 5);
         assert!(pump.token_decimals == 6, 6);
     }
@@ -811,7 +796,7 @@ module pump::pump {
         assert!(pump.platform_fee == 50, 1);
         assert!(pump.platform_fee_address == @pump, 2);
         assert!(pump.initial_virtual_token_reserves == 10000000000000000, 3);
-        assert!(pump.initial_virtual_apt_reserves == 30 * 100_000_000, 4);
+        assert!(pump.initial_virtual_move_reserves == 30 * 100_000_000, 4);
         assert!(pump.remain_token_reserves == 2000000000000000, 5);
     }
 
@@ -835,7 +820,7 @@ module pump::pump {
         assert!(pump.platform_fee == 50, 1);
         assert!(pump.platform_fee_address == @pump, 2);
         assert!(pump.initial_virtual_token_reserves == 10000000000000000, 3);
-        assert!(pump.initial_virtual_apt_reserves == 30 * 100_000_000, 4);
+        assert!(pump.initial_virtual_move_reserves == 30 * 100_000_000, 4);
         assert!(pump.remain_token_reserves == 2000000000000000, 5);
     }
 }

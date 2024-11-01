@@ -13,8 +13,8 @@ module pump::pump {
     use aptos_framework::coin::Coin;
     use aptos_framework::event;
 
-    use amm_v1::RazorSwapPool;
-    use amm_v1::RazorPoolLibrary;
+    use razor::RazorSwapPool;
+    use razor::RazorPoolLibrary;
 
     //errors
     const ERROR_INVALID_LENGTH: u64 = 9999;
@@ -106,7 +106,7 @@ module pump::pump {
     }
 
     #[view]
-    public fun buy_token<CoinType>(buy_token_amount: u64): u64 acquires PumpConfig, Pool {
+    public fun buy_token_amount<CoinType>(buy_token_amount: u64): u64 acquires PumpConfig, Pool {
         let config = borrow_global<PumpConfig>(@pump);
 
         let resource = account::create_signer_with_capability(&config.resource_cap);
@@ -114,8 +114,6 @@ module pump::pump {
         assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
 
         let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
-        assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
-
         let token_reserve_difference =
             pool.virtual_token_reserves - coin::value(&pool.remain_token_reserves);
 
@@ -132,6 +130,24 @@ module pump::pump {
     }
 
     #[view]
+    public fun buy_move_amount<CoinType>(buy_move_amount: u64): u64 acquires PumpConfig, Pool {
+        let config = borrow_global<PumpConfig>(@pump);
+        let resource = account::create_signer_with_capability(&config.resource_cap);
+        let resorce_addr = address_of(&resource);
+        assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
+
+        let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
+
+        (
+            calculate_buy_token(
+                (pool.virtual_token_reserves as u256),
+                (pool.virtual_apt_reserves as u256),
+                (buy_move_amount as u256)
+            ) as u64
+        )
+    }
+
+    #[view]
     public fun sell_token<CoinType>(sell_token_amount: u64): u64 acquires PumpConfig, Pool {
         let config = borrow_global<PumpConfig>(@pump);
 
@@ -139,10 +155,8 @@ module pump::pump {
         let resorce_addr = address_of(&resource);
         assert!(exists<Pool<CoinType>>(resorce_addr), ERROR_PUMP_NOT_EXIST);
         let pool = borrow_global_mut<Pool<CoinType>>(resorce_addr);
-        assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
-
         let liquidity_remove =
-            calculate_remove_liquidity_return(
+            calculate_sell_token(
                 (pool.virtual_token_reserves as u256),
                 (pool.virtual_apt_reserves as u256),
                 (sell_token_amount as u256)
@@ -160,11 +174,17 @@ module pump::pump {
         ((apt_reserves * virtual_token_reserves) / reserve_diff) - apt_reserves
     }
 
-    fun calculate_remove_liquidity_return(
-        token_reserves: u256, apt_reserves: u256, liquidity_removed: u256
+    fun calculate_sell_token(
+        token_reserves: u256, apt_reserves: u256, token_value: u256
     ): u256 {
-        apt_reserves
-            - ((token_reserves * apt_reserves) / (liquidity_removed + token_reserves))
+        apt_reserves - ((token_reserves * apt_reserves) / (token_value + token_reserves))
+    }
+
+    fun calculate_buy_token(
+        token_reserves: u256, move_reserves: u256, move_value: u256
+    ): u256 {
+        token_reserves - ((token_reserves * move_reserves) / (move_value
+            + move_reserves))
     }
 
     // initialize
@@ -425,7 +445,9 @@ module pump::pump {
 
         let pool = borrow_global_mut<Pool<CoinType>>(resource_addr);
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
-        coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
+        if (coin::is_coin_store_frozen<CoinType>(sender)) {
+            coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
+        };
 
         let token_reserve_difference =
             pool.virtual_token_reserves - coin::value(&pool.remain_token_reserves);
@@ -580,7 +602,7 @@ module pump::pump {
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
 
         let liquidity_remove =
-            calculate_remove_liquidity_return(
+            calculate_sell_token(
                 (pool.virtual_token_reserves as u256),
                 (pool.virtual_apt_reserves as u256),
                 (sell_token_amount as u256)
@@ -608,7 +630,9 @@ module pump::pump {
         coin::deposit(sender, token);
         coin::deposit(sender, apt);
 
-        coin::freeze_coin_store(sender, &pool.token_freeze_cap);
+        if (coin::is_coin_store_frozen<CoinType>(sender)) {
+            coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
+        };
 
         event::emit_event(
             &mut borrow_global_mut<Handle>(@pump).trade_events,

@@ -445,8 +445,8 @@ module pump::pump {
 
         let pool = borrow_global_mut<Pool<CoinType>>(resource_addr);
         assert!(!pool.is_completed, ERROR_PUMP_COMPLETED);
-        if (coin::is_coin_store_frozen<CoinType>(sender)) {
-            coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
+        if (coin::is_account_registered<CoinType>(sender) && coin::is_coin_store_frozen<CoinType>(sender)) {
+            coin::unfreeze_coin_store<CoinType>(sender, &pool.token_freeze_cap);
         };
 
         let token_reserve_difference =
@@ -608,7 +608,9 @@ module pump::pump {
                 (sell_token_amount as u256)
             );
 
-        coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
+        if (coin::is_account_registered<CoinType>(sender) && coin::is_coin_store_frozen<CoinType>(sender)) {
+            coin::unfreeze_coin_store<CoinType>(sender, &pool.token_freeze_cap);
+        };
         let out_coin = coin::withdraw<CoinType>(caller, sell_token_amount);
         let (token, apt) =
             swap<CoinType>(
@@ -630,9 +632,7 @@ module pump::pump {
         coin::deposit(sender, token);
         coin::deposit(sender, apt);
 
-        if (coin::is_coin_store_frozen<CoinType>(sender)) {
-            coin::unfreeze_coin_store(sender, &pool.token_freeze_cap);
-        };
+        coin::freeze_coin_store(sender, &pool.token_freeze_cap);
 
         event::emit_event(
             &mut borrow_global_mut<Handle>(@pump).trade_events,

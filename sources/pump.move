@@ -503,6 +503,9 @@ module pump::pump {
             let received_token_amount = coin::value(&received_token);
             let received_apt_amount = coin::value(&received_apt);
 
+            coin::register<CoinType>(&resource);
+            coin::register<AptosCoin>(&resource);
+
             coin::deposit(resource_addr, received_token);
             coin::deposit(resource_addr, received_apt);
 

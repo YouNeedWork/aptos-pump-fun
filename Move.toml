@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-pump = "0x52666e7e7e2709bd4565967fcb3fe7a796e1d29ff97da8ec91620e4f90b06224"
+pump = "0x2c19ca9fb773e90f102349d6c07a1676bcebca86a53ca21a1ed3c44659d748c9"
 dead = "0xdead"
 
 [dependencies.AptosFramework]

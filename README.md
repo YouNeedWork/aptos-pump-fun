@@ -1,4 +1,4 @@
-# Pump-fun-on-aptos
+# Pump-fun-on-aptos/movement
 
 ## Contract Link
 
